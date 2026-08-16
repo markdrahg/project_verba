@@ -1,5 +1,18 @@
 # Verba - Voice-Powered Transcription
 
+> **v2 architecture notes:** this pass fixed several reducer bugs
+> (punctuation-aware transcript joining, non-destructive delete-last-word),
+> replaced the implicit mode-priority cascade with an explicit state
+> machine (`src/features/modeMachine.ts`), unified the command list into a
+> single registry (`src/features/commands.ts`) so the parser and the help
+> panel can't drift apart, added localStorage autosave/restore
+> (`useTranscriptPersistence`), abstracted the speech backend behind a
+> `SpeechEngine` port (`src/features/speechEngine.ts`) with capped/backoff
+> auto-restart, added user-facing feedback for previously-silent failures
+> (unrecognized commands/letters), and added unit tests
+> (`src/features/__tests__/`, run with `bun run test` / `npm test`).
+
+
 A voice-to-text dictation application with intelligent command recognition built using React, TypeScript, and the Web Speech API.
 
 ## Features

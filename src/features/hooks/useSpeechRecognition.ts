@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { SpeechEngine, SpeechEngineOptions, UseSpeechEngine } from '../speechEngine';
 
 // Extend Window interface for Web Speech API
 interface SpeechRecognitionEvent extends Event {
@@ -31,32 +32,38 @@ declare global {
   }
 }
 
-interface UseSpeechRecognitionProps {
-  onResult: (transcript: string, isFinal: boolean) => void;
-  onError?: (error: string) => void;
-  onStart?: () => void;
-  onEnd?: () => void;
-  continuous?: boolean;
-  lang?: string;
-}
+// Auto-restart tuning. v1 restarted unconditionally and unboundedly on
+// every `onend` while `shouldRestartRef.current` was true — if `start()`
+// kept throwing (e.g. mic permission revoked mid-session), it would retry
+// forever, silently, inside a `catch {}` block with no cap and no
+// user-facing signal.
+const MAX_CONSECUTIVE_RESTART_FAILURES = 5;
+const RESTART_BACKOFF_BASE_MS = 300;
+
+// Errors the underlying engine recovers from on its own; not worth
+// surfacing to the user (matches v1 behavior for these two).
+const SILENT_ERROR_CODES = new Set(['no-speech', 'aborted']);
 
 /**
- * Hook for Web Speech API speech recognition
- * Handles browser compatibility and provides a clean interface
+ * Web Speech API implementation of the SpeechEngine port (see
+ * features/speechEngine.ts). Handles browser compatibility, restart
+ * backoff, and exposes a clean start/stop interface.
  */
-export function useSpeechRecognition({
+export const useSpeechRecognition: UseSpeechEngine = ({
   onResult,
   onError,
   onStart,
   onEnd,
   continuous = true,
   lang = 'en-US',
-}: UseSpeechRecognitionProps) {
+}: SpeechEngineOptions): SpeechEngine => {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [isSupported, setIsSupported] = useState(true);
   const [isListening, setIsListening] = useState(false);
   const shouldRestartRef = useRef(false);
-  
+  const consecutiveFailuresRef = useRef(0);
+  const restartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Use refs for callbacks to avoid re-initializing recognition
   const onResultRef = useRef(onResult);
   const onErrorRef = useRef(onError);
@@ -78,7 +85,7 @@ export function useSpeechRecognition({
 
     if (!SpeechRecognitionAPI) {
       setIsSupported(false);
-      onErrorRef.current?.('Speech recognition is not supported in this browser');
+      onErrorRef.current?.({ code: 'not-supported', recoverable: false });
       return;
     }
 
@@ -87,8 +94,32 @@ export function useSpeechRecognition({
     recognition.interimResults = true;
     recognition.lang = lang;
 
+    const attemptRestart = () => {
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+
+      if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_RESTART_FAILURES) {
+        shouldRestartRef.current = false;
+        onErrorRef.current?.({ code: 'restart-failed', recoverable: false });
+        return;
+      }
+
+      // Exponential backoff so a persistently failing mic (permission
+      // revoked, device unplugged, etc.) doesn't spin in a tight loop.
+      const delay = RESTART_BACKOFF_BASE_MS * 2 ** consecutiveFailuresRef.current;
+      restartTimeoutRef.current = setTimeout(() => {
+        try {
+          recognition.start();
+          consecutiveFailuresRef.current = 0;
+        } catch {
+          consecutiveFailuresRef.current += 1;
+          attemptRestart();
+        }
+      }, delay);
+    };
+
     recognition.onstart = () => {
       setIsListening(true);
+      consecutiveFailuresRef.current = 0;
       onStartRef.current?.();
     };
 
@@ -115,29 +146,17 @@ export function useSpeechRecognition({
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // Ignore no-speech errors in continuous mode
-      if (event.error === 'no-speech') {
+      if (SILENT_ERROR_CODES.has(event.error)) {
         return;
       }
-      
-      // Handle aborted - this is expected when stopping
-      if (event.error === 'aborted') {
-        return;
-      }
-
-      onErrorRef.current?.(event.error);
+      onErrorRef.current?.({ code: event.error, recoverable: shouldRestartRef.current });
     };
 
     recognition.onend = () => {
       setIsListening(false);
-      
-      // Auto-restart if we should be listening
+
       if (shouldRestartRef.current) {
-        try {
-          recognition.start();
-        } catch (e) {
-          // Ignore start errors during restart
-        }
+        attemptRestart();
       } else {
         onEndRef.current?.();
       }
@@ -147,6 +166,7 @@ export function useSpeechRecognition({
 
     return () => {
       shouldRestartRef.current = false;
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       recognition.abort();
     };
   }, [continuous, lang]);
@@ -156,8 +176,9 @@ export function useSpeechRecognition({
 
     try {
       shouldRestartRef.current = true;
+      consecutiveFailuresRef.current = 0;
       recognitionRef.current.start();
-    } catch (error) {
+    } catch {
       // Already started, ignore
     }
   }, [isSupported]);
@@ -166,6 +187,7 @@ export function useSpeechRecognition({
     if (!recognitionRef.current) return;
 
     shouldRestartRef.current = false;
+    if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
     recognitionRef.current.stop();
   }, []);
 
@@ -175,4 +197,4 @@ export function useSpeechRecognition({
     start,
     stop,
   };
-}
+};

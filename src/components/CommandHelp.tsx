@@ -1,20 +1,16 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const COMMANDS = [
-  { command: '"Start listening" / "Stop listening"', description: 'Toggle microphone' },
-  { command: '"Command mode" / "Dictate"', description: 'Switch between command & dictation modes' },
-  { command: '"Pause dictation" / "Resume dictation"', description: 'Pause/resume transcription' },
-  { command: '"Activate spelling" / "Exit spelling"', description: 'Spell words letter by letter' },
-  { command: '"Delete last word"', description: 'Remove the last word (requires confirmation)' },
-  { command: '"Confirm" / "Cancel"', description: 'Confirm or cancel pending actions' },
-  { command: '"Dark mode" / "Light mode"', description: 'Switch theme (command mode only)' },
-  { command: '"Toggle theme"', description: 'Toggle between dark and light (command mode only)' },
-];
+import { COMMAND_REGISTRY, PARAMETERIZED_COMMAND_HELP } from '@/features/commands';
 
 /**
- * Collapsible help section showing available voice commands
+ * Collapsible help section showing available voice commands.
+ *
+ * Reads directly from COMMAND_REGISTRY (features/commands.ts) so this panel
+ * can never drift out of sync with what the parser actually recognizes.
+ * Parameterized commands (e.g. "delete paragraph 2") aren't in that
+ * registry — their wording varies, so they're documented separately in
+ * PARAMETERIZED_COMMAND_HELP and merged in here for display only.
  */
 export function CommandHelp() {
   const [isOpen, setIsOpen] = useState(false);
@@ -43,13 +39,24 @@ export function CommandHelp() {
       {isOpen && (
         <div className="mt-2 glass-card p-4 animate-scale-in">
           <div className="grid gap-2">
-            {COMMANDS.map(({ command, description }) => (
+            {COMMAND_REGISTRY.map(({ command, label, description }) => (
               <div
                 key={command}
                 className="flex items-start gap-3 py-2 border-b border-border/30 last:border-0"
               >
                 <code className="text-xs bg-secondary px-2 py-1 rounded text-primary font-mono flex-shrink-0">
-                  {command}
+                  {label}
+                </code>
+                <span className="text-sm text-muted-foreground">{description}</span>
+              </div>
+            ))}
+            {PARAMETERIZED_COMMAND_HELP.map(({ label, description }) => (
+              <div
+                key={label}
+                className="flex items-start gap-3 py-2 border-b border-border/30 last:border-0"
+              >
+                <code className="text-xs bg-secondary px-2 py-1 rounded text-primary font-mono flex-shrink-0">
+                  {label}
                 </code>
                 <span className="text-sm text-muted-foreground">{description}</span>
               </div>
