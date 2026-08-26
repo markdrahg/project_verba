@@ -15,6 +15,10 @@
 
 A voice-to-text dictation application with intelligent command recognition built using React, TypeScript, and the Web Speech API.
 
+## HOSTED URL
+https://project-verba.vercel.app/
+
+
 ## Features
 
 - **Real-time Voice Transcription** - Convert speech to text instantly
